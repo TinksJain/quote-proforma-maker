@@ -276,7 +276,7 @@
         if (firm === "The House of Cables and Wires Private Limited") prefix = "HOC_";
         else if (firm === "Akash Wires & Cables Pvt. Ltd.") prefix = "AWC_";
 
-        const seqKey = `seq_${prefix}`; let seq = parseInt(localStorage.getItem(seqKey) \vert{}\vert{} "1", 10); localStorage.setItem(seqKey, seq + 1); }  function formatCurrency(amount, allowDecimals = true) { if (!allowDecimals) return amount.toLocaleString('en-IN', { maximumFractionDigits: 0 }); return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }  function loadQuotationToProforma() { const refInput = document.getElementById('lookupQuotRef').value.trim().toUpperCase(); const statusEl = document.getElementById('convertStatus');  if (!refInput) { alert("Please enter a valid Quotation Reference Number."); return; }  const savedData = localStorage.getItem(`quotation_store_${refInput}`);
+        const seqKey = `seq_${prefix}`; let seq = parseInt(localStorage.getItem(seqKey) || "1", 10); localStorage.setItem(seqKey, seq + 1); }  function formatCurrency(amount, allowDecimals = true) { if (!allowDecimals) return amount.toLocaleString('en-IN', { maximumFractionDigits: 0 }); return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }  function loadQuotationToProforma() { const refInput = document.getElementById('lookupQuotRef').value.trim().toUpperCase(); const statusEl = document.getElementById('convertStatus');  if (!refInput) { alert("Please enter a valid Quotation Reference Number."); return; }  const savedData = localStorage.getItem(`quotation_store_${refInput}`);
         if (!savedData) {
             statusEl.style.display = 'block';
             statusEl.style.color = '#dc3545';
