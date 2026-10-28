@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotation & Proforma Generator</title>
+    <!-- Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: auto; background-color: #f4f6f9; color: #333; }
+        .container { background-color: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        h2 { margin-top: 0; color: #1B365D; border-bottom: 2px solid #1B365D; padding-bottom: 8px; }
+        .form-group { margin-bottom: 15px; position: relative; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; color: #444; }
+        input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        textarea { resize: vertical; height: 60px; font-family: inherit; }
+
+        .autocomplete-items {
+            position: absolute; border: 1px solid #d4d4d4; border-top: none; z-index: 99;
+            top: 100%; left: 0; right: 0; background-color: #fff; max-height: 180px; overflow-y: auto;
+            border-radius: 0 0 4px 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .autocomplete-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 13px; }
+        .autocomplete-item:hover { background-color: #e9ecef; }
+
+        button { color: white; padding: 12px 15px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 15px; font-weight: bold; transition: background 0.2s; }
+        .btn-add { background-color: #1B365D; }
+        .btn-add:hover { background-color: #122440; }
+        .btn-pdf { background-color: #28a745; margin-top: 20px; font-size: 16px; }
+        .btn-pdf:hover { background-color: #218838; }
+        .btn-delete { background-color: #dc3545; padding: 4px 8px; font-size: 12px; width: auto; font-weight: bold; }
+        .btn-delete:hover { background-color: #c82333; }
+        .btn-convert { background-color: #6f42c1; width: auto; padding: 10px 15px; margin-top: 0; white-space: nowrap; }
+        .btn-convert:hover { background-color: #59359a; }
+        
+        .excel-box, .bank-box, .ocr-box, .convert-box { padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 1px dashed #6c757d; }
+        .convert-box { background-color: #f3eefc; border-color: #6f42c1; }
+        .excel-box { background-color: #e9ecef; border-color: #6c757d; }
+        .ocr-box { background-color: #fdf7e7; border-color: #d99b00; }
+        .bank-box { background-color: #f0f4f8; border: 1px dashed #1B365D; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; vertical-align: middle; }
+        th { background-color: #1B365D; color: white; font-size: 12px; }
+        
+        .table-input { width: 60px; padding: 4px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px; text-align: right; }
+        .table-input-name { width: 100%; padding: 4px 6px; font-size: 13px; font-weight: bold; border: 1px solid #ccc; border-radius: 3px; }
+        .table-input-note { width: 100%; padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 3px; margin-top: 3px; color: #555; }
+
+        .checkbox-group { display: flex; align-items: center; gap: 8px; }
+        .checkbox-group input { width: auto; transform: scale(1.1); }
+        .row { display: flex; gap: 10px; }
+        .row .form-group { flex: 1; }
+        #uploadStatus, #ocrStatus, #convertStatus { font-size: 12px; font-weight: bold; margin-top: 5px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Quotation & Proforma Generator</h2>
+
+    <!-- Convert Box -->
+    <div class="convert-box">
+        <label style="color: #6f42c1;">🔄 Convert Saved Quotation to Pro-Forma Invoice</label>
+        <div style="display: flex; gap: 10px; margin-top: 5px;">
+            <input type="text" id="lookupQuotRef" placeholder="Enter Quotation Ref (e.g. HOC_01)" style="text-transform: uppercase;">
+            <button type="button" class="btn-convert" id="btnLoadQuotation">Load & Convert</button>
+        </div>
+        <div id="convertStatus"></div>
+    </div>
+
+    <!-- Excel Upload Box -->
+    <div class="excel-box">
+        <label for="excelFile">📂 Load Inventory (Excel/CSV)</label>
+        <input type="file" id="excelFile" accept=".xlsx, .xls, .csv">
+        
+        <div style="margin-top: 8px;" class="checkbox-group">
+            <input type="checkbox" id="autoAddExcelRows">
+            <label for="autoAddExcelRows" style="margin:0; font-weight:normal;">
+                Auto-add all rows directly to item list upon upload
+            </label>
+        </div>
+
+        <div id="uploadStatus">✓ Inventory loaded successfully!</div>
+        <small style="color: #666; display: block; margin-top: 4px;">Format: Col A = Name, Col B = Price, Col C = Qty, Col D = Unit</small>
+    </div>
+
+    <!-- OCR Upload Box -->
+    <div class="ocr-box">
+        <label for="imageFile" style="color: #8a6300;">📷 Load Items from Image (OCR Scan)</label>
+        <input type="file" id="imageFile" accept="image/*">
+        <div id="ocrStatus">Scanning image text...</div>
+        <small style="color: #8a6300; display: block; margin-top: 4px;">Automatically extracts item names & prices from clear scans.</small>
+    </div>
+
+    <div class="row">
+        <div class="form-group">
+            <label>Document Type</label>
+            <select id="docType">
+                <option value="QUOTATION">Quotation</option>
+                <option value="PROFORMA INVOICE">Pro-forma Invoice</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Select Firm (From)</label>
+            <select id="firmName">
+                <option value="Akash Cable Corporation">Akash Cable Corporation</option>
+                <option value="Akash Wires & Cables Pvt. Ltd.">Akash Wires & Cables Pvt. Ltd.</option>
+                <option value="The House of Cables and Wires Private Limited">The House of Cables and Wires Private Limited</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="form-group">
+            <label>Quotation Reference #</label>
+            <input type="text" id="quotationRef" placeholder="e.g. HOC_01">
+        </div>
+        <div class="form-group">
+            <label>Billed / Quoted To (Client Name)</label>
+            <input type="text" id="clientName" placeholder="Optional client name...">
+        </div>
+    </div>
+
+    <div id="bankDetailsSection" class="bank-box" style="display: none;">
+        <label style="color: #1B365D; margin-bottom: 8px;">🏦 Bank Account Details (Pro-forma Invoice)</label>
+        <div class="row">
+            <div class="form-group">
+                <label>Account Name</label>
+                <input type="text" id="bankAccName" value="Akash Cable Corporation">
+            </div>
+            <div class="form-group">
+                <label>Bank Name</label>
+                <input type="text" id="bankName" value="HDFC Bank">
+            </div>
+        </div>
+        <div class="row">
+            <div class="form-group">
+                <label>Account Number</label>
+                <input type="text" id="bankAccNo" value="50200012345678">
+            </div>
+            <div class="form-group">
+                <label>IFSC Code</label>
+                <input type="text" id="bankIfsc" value="HDFC0001234">
+            </div>
+            <div class="form-group">
+                <label>Branch</label>
+                <input type="text" id="bankBranch" value="Chennai Main Branch">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-group checkbox-group">
+        <input type="checkbox" id="showDiscount">
+        <label for="showDiscount" style="margin: 0; font-weight: normal;">Include Discount Column in final PDF</label>
+    </div>
+
+    <hr style="border: 0; border-top: 1px solid #ddd; margin: 20px 0;">
+
+    <div class="form-group">
+        <label>Item Description</label>
+        <input type="text" id="itemName" autocomplete="off" placeholder="Search or add custom item...">
+        <div id="autocomplete-list" class="autocomplete-items"></div>
+    </div>
+
+    <div class="form-group">
+        <label>Item Comment / Notes (Optional)</label>
+        <input type="text" id="itemComment" placeholder="Add specs, specifications, or notes...">
+    </div>
+
+    <div class="row">
+        <div class="form-group">
+            <label>Quantity</label>
+            <input type="number" id="itemQty" value="1" min="0.01" step="any">
+        </div>
+        <div class="form-group">
+            <label>Unit (Optional)</label>
+            <input type="text" id="itemUnit" placeholder="e.g. Coils, Mtr, Pcs">
+        </div>
+        <div class="form-group">
+            <label>Price (₹)</label>
+            <input type="number" id="itemPrice" value="0" min="0" step="any">
+        </div>
+        <div class="form-group">
+            <label>Discount (%)</label>
+            <input type="number" id="itemDiscount" value="0" min="0" max="100" step="any">
+        </div>
+    </div>
+
+    <button type="button" id="btnAdd" class="btn-add">+ Add Item to List</button>
+
+    <table id="itemsTable">
+        <thead>
+            <tr>
+                <th style="width: 32%;">Item & Note</th>
+                <th>Qty</th>
+                <th>Price (₹)</th>
+                <th>Disc (%)</th>
+                <th>Net Price (₹)</th>
+                <th>Total (₹)</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <div class="form-group" style="margin-top: 20px;">
+        <label for="quotationNote">Additional Note (Optional)</label>
+        <textarea id="quotationNote" placeholder="e.g. Rate valid for 3 days only. GST extra as applicable."></textarea>
+    </div>
+
+    <button type="button" id="btnPdf" class="btn-pdf">Download PDF & Export Excel Backup</button>
+</div>
+
+<script>
+    let itemsList = [];
+    let inventoryDatabase = {};
+
+    async function getLogoDataUri() {
+        try {
+            const response = await fetch('HOC_Logo.jpeg');
+            if (response.ok) {
+                const blob = await response.blob();
+                return await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            }
+        } catch (e) {
+            console.warn("Logo load fallback or missing file.");
+        }
+        return null;
+    }
+
+    document.getElementById('btnAdd').addEventListener('click', addItem);
+    document.getElementById('btnPdf').addEventListener('click', generatePDFAndBackupExcel);
+    document.getElementById('excelFile').addEventListener('change', handleExcelUpload);
+    document.getElementById('imageFile').addEventListener('change', handleImageUpload);
+    document.getElementById('firmName').addEventListener('change', generateRefNumber);
+    document.getElementById('btnLoadQuotation').addEventListener('click', loadQuotationToProforma);
+
+    const docTypeSelect = document.getElementById('docType');
+    const bankSection = document.getElementById('bankDetailsSection');
+    
+    docTypeSelect.addEventListener('change', function() {
+        bankSection.style.display = (this.value === 'PROFORMA INVOICE') ? 'block' : 'none';
+    });
+
+    const itemNameInput = document.getElementById('itemName');
+    const suggestionsBox = document.getElementById('autocomplete-list');
+
+    window.onload = function() {
+        generateRefNumber();
+    };
+
+    function generateRefNumber() {
+        const firm = document.getElementById('firmName').value;
+        let prefix = "ACC_";
+        if (firm === "The House of Cables and Wires Private Limited") prefix = "HOC_";
+        else if (firm === "Akash Wires & Cables Pvt. Ltd.") prefix = "AWC_";
+
+        const seqKey = `seq_${prefix}`;
+        let seq = parseInt(localStorage.getItem(seqKey) || "1", 10);
+        document.getElementById('quotationRef').value = `${prefix}${seq.toString().padStart(2, '0')}`;
+    }
+
+    function incrementRefSequence() {
+        const firm = document.getElementById('firmName').value;
+        let prefix = "ACC_";
+        if (firm === "The House of Cables and Wires Private Limited") prefix = "HOC_";
+        else if (firm === "Akash Wires & Cables Pvt. Ltd.") prefix = "AWC_";
+
+        const seqKey = `seq_${prefix}`; let seq = parseInt(localStorage.getItem(seqKey) \vert{}\vert{} "1", 10); localStorage.setItem(seqKey, seq + 1); }  function formatCurrency(amount, allowDecimals = true) { if (!allowDecimals) return amount.toLocaleString('en-IN', { maximumFractionDigits: 0 }); return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }  function loadQuotationToProforma() { const refInput = document.getElementById('lookupQuotRef').value.trim().toUpperCase(); const statusEl = document.getElementById('convertStatus');  if (!refInput) { alert("Please enter a valid Quotation Reference Number."); return; }  const savedData = localStorage.getItem(`quotation_store_${refInput}`);
+        if (!savedData) {
+            statusEl.style.display = 'block';
+            statusEl.style.color = '#dc3545';
+            statusEl.innerText = `❌ No record found for Quotation Ref: ${refInput}`;
+            return;
+        }
+
+        const record = JSON.parse(savedData);
+        document.getElementById('docType').value = 'PROFORMA INVOICE';
+        bankSection.style.display = 'block';
+        document.getElementById('firmName').value = record.firm;
+        document.getElementById('clientName').value = record.client;
+        document.getElementById('quotationRef').value = record.quotRef;
+        document.getElementById('quotationNote').value = record.note || "";
+        itemsList = record.items || [];
+        
+        updateTable();
+
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#28a745';
+        statusEl.innerText = `✓ Loaded and converted ${refInput} to Pro-Forma Invoice!`;
+        setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+    }
+
+    function saveQuotationRecord(quotRef, firm, client, items, note) {
+        const record = { quotRef, firm, client, items, note, timestamp: new Date().toISOString() };
+        localStorage.setItem(`quotation_store_${quotRef.trim().toUpperCase()}`, JSON.stringify(record)); }  function handleExcelUpload(event) { const file = event.target.files[0]; if (!file) return;  const autoAdd = document.getElementById('autoAddExcelRows').checked; const reader = new FileReader();  reader.onload = function(e) { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, { type: 'array' }); const worksheet = workbook.Sheets[workbook.SheetNames[0]]; const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });  inventoryDatabase = {}; let addedCount = 0;  for (let i = 1; i < rows.length; i++) { const name = rows[i][0]; const price = parseFloat(rows[i][1]) \vert{}\vert{} 0; const qty = parseFloat(rows[i][2]) \vert{}\vert{} 1; const unit = rows[i][3] ? rows[i][3].toString().trim() : "";  if (name && name.toString().trim() !== "") { const cleanName = name.toString().trim(); inventoryDatabase[cleanName] = { price, qty, unit };  if (autoAdd) { itemsList.push({ name: cleanName, comment: "", qty, unit, price, discountPercent: 0, total: qty * price }); addedCount++; } } }  if (autoAdd && addedCount > 0) updateTable();  const statusEl = document.getElementById('uploadStatus'); statusEl.innerText = autoAdd ? `✓ ${addedCount} items added automatically!` : '✓ Inventory loaded successfully!';
+            statusEl.style.display = 'block';
+            setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    async function handleImageUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const ocrStatus = document.getElementById('ocrStatus');
+        ocrStatus.style.display = 'block';
+        ocrStatus.style.color = '#d99b00';
+        ocrStatus.innerText = '🔍 Processing image text via OCR... Please wait.';
+
+        try {
+            const worker = await Tesseract.createWorker('eng');
+            const ret = await worker.recognize(file);
+            await worker.terminate();
+
+            const textLines = ret.data.text.split('\n');
+            let scannedItemsCount = 0;
+
+            textLines.forEach(line => {
+                const cleanLine = line.trim();
+                if (cleanLine.length < 3) return;
+
+                const priceMatch = cleanLine.match(/([\d,]+(?:\.\d{1,2})?)\s*$/);
+                if (priceMatch) {
+                    const priceVal = parseFloat(priceMatch[1].replace(/,/g, ''));
+                    let nameVal = cleanLine.substring(0, priceMatch.index).trim().replace(/^[^a-zA-Z0-9]+/, '');
+
+                    if (nameVal.length > 2 && !isNaN(priceVal)) {
+                        itemsList.push({ name: nameVal, comment: "OCR Extracted", qty: 1, unit: "", price: priceVal, discountPercent: 0, total: priceVal });
+                        scannedItemsCount++;
+                    }
+                }
+            });
+
+            if (scannedItemsCount > 0) {
+                updateTable();
+                ocrStatus.style.color = '#28a745';
+                ocrStatus.innerText = `✓ Successfully extracted ${scannedItemsCount} items!`; } else { ocrStatus.style.color = '#dc3545'; ocrStatus.innerText = '⚠️ No readable items/prices found.'; } } catch (err) { ocrStatus.style.color = '#dc3545'; ocrStatus.innerText = '❌ Error processing image text.'; }  setTimeout(() => { ocrStatus.style.display = 'none'; }, 5000); }  itemNameInput.addEventListener('input', function() { const val = this.value; suggestionsBox.innerHTML = ''; if (!val) return;  for (const item in inventoryDatabase) { if (item.toLowerCase().includes(val.toLowerCase())) { const div = document.createElement('div'); div.className = 'autocomplete-item'; div.innerHTML = item.replace(new RegExp(`(${val})`, "gi"), "<strong>$1</strong>");
+                div.addEventListener('click', function() {
+                    itemNameInput.value = item;
+                    suggestionsBox.innerHTML = '';
+                    autoFillDetails(); 
+                });
+                suggestionsBox.appendChild(div);
+            }
+        }
+    });
+
+    document.addEventListener('click', function(e) {
+        if (e.target !== itemNameInput) suggestionsBox.innerHTML = '';
+    });
+
+    function autoFillDetails() {
+        const selectedItem = document.getElementById('itemName').value;
+        if (inventoryDatabase.hasOwnProperty(selectedItem)) {
+            const itemData = inventoryDatabase[selectedItem];
+            document.getElementById('itemPrice').value = itemData.price;
+            document.getElementById('itemQty').value = itemData.qty || 1;
+            document.getElementById('itemUnit').value = itemData.unit;
+        }
+    }
+
+    function addItem() {
+        const name = document.getElementById('itemName').value;
+        const comment = document.getElementById('itemComment').value.trim();
+        const qty = parseFloat(document.getElementById('itemQty').value) || 0;
+        const unit = document.getElementById('itemUnit').value.trim();
+        const price = parseFloat(document.getElementById('itemPrice').value) || 0;
+        const discountPercent = parseFloat(document.getElementById('itemDiscount').value) || 0;
+
+        if (!name.trim()) {
+            alert("Please enter an item description.");
+            return;
+        }
+
+        const subtotal = qty * price;
+        const total = subtotal - (subtotal * (discountPercent / 100));
+
+        itemsList.push({ name, comment, qty, unit, price, discountPercent, total });
+        updateTable();
+        
+        document.getElementById('itemName').value = '';
+        document.getElementById('itemComment').value = '';
+        document.getElementById('itemQty').value = '1';
+        document.getElementById('itemUnit').value = '';
+        document.getElementById('itemPrice').value = '0';
+        document.getElementById('itemDiscount').value = '0';
+    }
+
+    function updateItemRow(index, field, value) {
+        itemsList[index][field] = parseFloat(value) || 0;
+        const qty = itemsList[index].qty;
+        const price = itemsList[index].price;
+        const discountPercent = itemsList[index].discountPercent;
+
+        const subtotal = qty * price;
+        itemsList[index].total = subtotal - (subtotal * (discountPercent / 100));
+        updateTable();
+    }
+
+    function updateItemName(index, value) { itemsList[index].name = value; }
+    function updateItemComment(index, value) { itemsList[index].comment = value.trim(); }
+    function removeItem(index) { itemsList.splice(index, 1); updateTable(); }
+
+    function updateTable() {
+        const tbody = document.querySelector('#itemsTable tbody');
+        tbody.innerHTML = ''; 
+        let subtotalSum = 0;
+
+        itemsList.forEach((item, index) => {
+            subtotalSum += item.total;
+            const tr = document.createElement('tr');
+            if (index % 2 === 1) tr.style.backgroundColor = "#F7F9FA";
+            
+            const netPrice = item.price * (1 - (item.discountPercent / 100));
+            const unitLabel = item.unit ? `<span style="font-size:11px; color:#555;"> ${item.unit}</span>` : '';
+
+            tr.innerHTML = `
+                <td>
+                    <input type="text" class="table-input-name" value="${item.name.replace(/"/g, '&quot;')}" onchange="updateItemName(${index}, this.value)">
+                    <input type="text" class="table-input-note" value="${item.comment || ''}" placeholder="Add note..." onchange="updateItemComment(${index}, this.value)">
+                </td>
+                <td><input type="number" class="table-input" value="${item.qty}" min="0" step="any" onchange="updateItemRow(${index}, 'qty', this.value)">${unitLabel}</td>
+                <td><input type="number" class="table-input" value="${item.price}" min="0" step="any" onchange="updateItemRow(${index}, 'price', this.value)"></td>
+                <td><input type="number" class="table-input" value="${item.discountPercent}" min="0" max="100" step="any" onchange="updateItemRow(${index}, 'discountPercent', this.value)"></td>
+                <td style="color: #28a745; font-weight: bold;">₹${formatCurrency(netPrice)}</td>
+                <td style="font-weight: bold;">₹${formatCurrency(item.total)}</td>
+                <td style="text-align: center;"><button class="btn-delete" onclick="removeItem(${index})">X</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        if (itemsList.length > 0) {
+            const gstAmount = subtotalSum * 0.18;
+            const grandTotal = Math.round(subtotalSum + gstAmount); 
+
+            tbody.innerHTML += `
+                <tr style="background:#fff;"><td colspan="5" style="text-align:right; font-weight:bold;">Subtotal:</td><td colspan="2" style="font-weight:bold;">₹${formatCurrency(subtotalSum)}</td></tr>
+                <tr style="background:#fff;"><td colspan="5" style="text-align:right; font-weight:bold;">GST (18%):</td><td colspan="2" style="font-weight:bold;">₹${formatCurrency(gstAmount)}</td></tr>
+                <tr style="background:#EAF0F6;"><td colspan="5" style="text-align:right; font-weight:bold;">Grand Total:</td><td colspan="2" style="font-weight:bold; color:#1B365D;">₹${formatCurrency(grandTotal, false)}</td></tr>
+            `;
+        }
+    }
+
+    function getFormattedFilename(prefix, clientName, quotRef, dateObj) {
+        const cleanClient = clientName ? clientName.trim().replace(/[^a-zA-Z0-9]/g, '_') : '';
+        const cleanRef = quotRef ? quotRef.trim().replace(/[^a-zA-Z0-9]/g, '_') : '';
+        const dateStr = `${dateObj.getDate().toString().padStart(2, '0')}${(dateObj.getMonth() + 1).toString().padStart(2, '0')}`;
+        return [prefix, cleanClient, cleanRef, dateStr].filter(Boolean).join('_');
+    }
+
+    function exportBackupExcel(filenameBase) {
+        const exportData = [["Item Description", "Price", "Quantity", "Unit"]];
+        itemsList.forEach(item => exportData.push([item.name, item.price, item.qty, item.unit || ""]));
+        const worksheet = XLSX.utils.aoa_to_sheet(exportData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Backup");
+        XLSX.writeFile(workbook, `${filenameBase}.xlsx`); }  async function generatePDFAndBackupExcel() { if (typeof window.jspdf === 'undefined') { alert("Error: jsPDF library failed to load."); return; } if (itemsList.length === 0) { alert("Please add at least one item before generating PDF."); return; }  try { const { jsPDF } = window.jspdf; const doc = new jsPDF();  const docType = document.getElementById('docType').value; const firm = document.getElementById('firmName').value; const client = document.getElementById('clientName').value.trim(); const quotRef = document.getElementById('quotationRef').value.trim(); const showDiscount = document.getElementById('showDiscount').checked; const quotationNote = document.getElementById('quotationNote').value.trim();  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(27, 54, 93); doc.text(firm, 14, 14);  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(80, 80, 80); doc.text("GSTIN: 33AAWCA1661N1Z7", 14, 19); doc.text("No.221, Govindappa Naicken Street, Sowcarpet, Chennai - 600001", 14, 23); doc.text("E-Mail: thehouseofcables@gmail.com \vert{} Phone: 99622931214 / 9952923288", 14, 27);  if (firm === "The House of Cables and Wires Private Limited") { const dataUri = await getLogoDataUri(); if (dataUri) doc.addImage(dataUri, 'JPEG', 162, 10, 32, 32); }  doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(92, 107, 115); doc.text(docType, 14, 35);  doc.setDrawColor(27, 54, 93); doc.setLineWidth(1); doc.line(14, 38, 196, 38);  const d = new Date(); const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+            
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "bold");
+            doc.text("Ref #:", 150, 45);
+            doc.setFont("helvetica", "normal");
+            doc.text(quotRef, 165, 45);
+
+            doc.setFont("helvetica", "bold");
+            doc.text("Date:", 150, 50);
+            doc.setFont("helvetica", "normal");
+            doc.text(dateStr, 165, 50);
+
+            let startY = 55;
+            if (client !== "") {
+                doc.setFont("helvetica", "bold");
+                doc.setTextColor(27, 54, 93);
+                doc.text(`${docType === 'QUOTATION' ? 'Quotation For:' : 'Billed To:'}${client}`, 14, startY);
+                startY += 8;
+            }
+
+            const head = showDiscount ? [['Item Description', 'Qty', 'Price (Rs)', 'Discount (%)', 'Total (Rs)']] : [['Item Description', 'Qty', 'Price (Rs)', 'Total (Rs)']];
+            let body = [];
+            let subtotalSum = 0;
+
+            itemsList.forEach(item => {
+                subtotalSum += item.total;
+                const desc = item.comment ? `${item.name}\nNote:${item.comment}` : item.name;
+                const qtyVal = item.unit ? `${item.qty}${item.unit}` : item.qty.toString();
+
+                if (showDiscount) {
+                    body.push([desc, qtyVal, formatCurrency(item.price), item.discountPercent + '%', formatCurrency(item.total)]);
+                } else {
+                    const netPrice = item.price * (1 - (item.discountPercent / 100));
+                    body.push([desc, qtyVal, formatCurrency(netPrice), formatCurrency(item.total)]);
+                }
+            });
+
+            doc.autoTable({
+                startY: startY,
+                head: head,
+                body: body,
+                theme: 'plain',
+                headStyles: { fillColor: [27, 54, 93], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+                alternateRowStyles: { fillColor: [247, 249, 250] },
+                styles: { fontSize: 8.5, cellPadding: 2.5, textColor: [30, 30, 30], lineColor: [235, 240, 243], lineWidth: 0.1 },
+                margin: { left: 14, right: 14, bottom: 20 }
+            });
+
+            const gstAmount = subtotalSum * 0.18;
+            const grandTotal = Math.round(subtotalSum + gstAmount);
+            let currentY = doc.lastAutoTable.finalY + 5;
+
+            if (currentY + 50 > doc.internal.pageSize.height - 15) {
+                doc.addPage();
+                currentY = 20; 
+            }
+
+            doc.autoTable({
+                startY: currentY,
+                margin: { left: 95, right: 14 },
+                theme: 'plain',
+                body: [
+                    ['Subtotal:', 'Rs ' + formatCurrency(subtotalSum)],
+                    ['GST (18%):', 'Rs ' + formatCurrency(gstAmount)],
+                    ['Grand Total:', 'Rs ' + formatCurrency(grandTotal, false)]
+                ],
+                columnStyles: { 0: { halign: 'right', fontStyle: 'bold' }, 1: { halign: 'right', fontStyle: 'bold' } },
+                styles: { fontSize: 9, cellPadding: 2 }
+            });
+
+            currentY = doc.lastAutoTable.finalY + 8;
+
+            if (docType === 'PROFORMA INVOICE') {
+                doc.autoTable({
+                    startY: currentY,
+                    margin: { left: 14, right: 95 },
+                    theme: 'plain',
+                    body: [
+                        ['Bank Details for Payment'],
+                        [`Account Name: ${document.getElementById('bankAccName').value}`],
+                        [`Bank Name: ${document.getElementById('bankName').value}`],
+                        [`Account No: ${document.getElementById('bankAccNo').value}`],
+                        [`IFSC Code: ${document.getElementById('bankIfsc').value}`],
+                        [`Branch: ${document.getElementById('bankBranch').value}`] ], styles: { fontSize: 8, cellPadding: 1 } }); currentY = doc.lastAutoTable.finalY + 6; }  if (quotationNote !== "") { const textLines = doc.splitTextToSize(quotationNote, 160); doc.setFillColor(255, 248, 240); doc.rect(14, currentY, 182, 12, 'F'); doc.setFontSize(8.5); doc.setTextColor(180, 60, 20); doc.text(textLines, 18, currentY + 7); }  const docPrefix = (docType === 'QUOTATION') ? 'Quotation' : 'Proforma'; const filenameBase = getFormattedFilename(docPrefix, client, quotRef, d);  doc.save(`${filenameBase}.pdf`);
+            exportBackupExcel(filenameBase);
+
+            if (docType === 'QUOTATION') {
+                saveQuotationRecord(quotRef, firm, client, itemsList, quotationNote);
+                incrementRefSequence();
+                generateRefNumber();
+            }
+        } catch (err) {
+            alert("PDF Generation error: " + err.message);
+            console.error(err);
+        }
+    }
+</script>
+</body>
+</html>
