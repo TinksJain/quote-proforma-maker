@@ -128,9 +128,9 @@
         <div id="convertStatus"></div>
     </div>
 
-    <!-- Excel Upload Box / GitHub CORS Proxy Sync -->
+    <!-- Excel Upload Box / Cloud Sync Info -->
     <div class="excel-box">
-        <label for="excelFile">📂 Inventory Catalog (GitHub Cloud Sync via Proxy)</label>
+        <label for="excelFile">📂 Inventory Catalog (Loaded via inventory.js & Local Upload)</label>
         <input type="file" id="excelFile" accept=".xlsx, .xls, .csv">
         <div class="checkbox-group">
             <input type="checkbox" id="autoAddExcelRows">
@@ -272,29 +272,19 @@
     <button type="button" id="btnPdf" class="btn-pdf">📄 Generate PDF & Backup Excel</button>
 </div>
 
+<!-- Load inventory database directly via script tag (Bypasses CORS entirely) -->
+<script src="inventory.js"></script>
+
 <script>
     let itemsList = [];
     let inventoryDatabase = {};
 
-    // --- SOLUTION 2: GitHub Raw URL wrapped through CORS proxy ---
-    const GITHUB_CSV_URL = "https://raw.githubusercontent.com/TinksJain/quote-proforma-maker/main/inventory.xlsx";
-
-    async function loadCloudInventory() {
-        if (!GITHUB_CSV_URL) return;
-        try {
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(GITHUB_CSV_URL)}`;
-            const response = await fetch(proxyUrl);
-            
-            if (response.ok) {
-                const arrayBuffer = await response.arrayBuffer();
-                const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                parseInventoryRows(rows);
-                console.log("✓ Cloud inventory successfully synced via CORS proxy!");
-            }
-        } catch (e) {
-            console.warn("Cloud inventory sync failed:", e);
+    function loadCloudInventory() {
+        if (typeof window.INVENTORY_DATA !== 'undefined') {
+            inventoryDatabase = window.INVENTORY_DATA;
+            console.log("✓ Cloud inventory database synced successfully via inventory.js");
+        } else {
+            console.warn("inventory.js not detected or loaded yet.");
         }
     }
 
@@ -428,7 +418,7 @@
         if (autoAdd && addedCount > 0) updateTable();
 
         const statusEl = document.getElementById('uploadStatus');
-        statusEl.innerText = autoAdd ? `✓ ${addedCount} items added automatically!` : '✓ Inventory loaded successfully via cloud sync!';
+        statusEl.innerText = autoAdd ? `✓ ${addedCount} items added automatically!` : '✓ Inventory loaded successfully!';
         statusEl.style.display = 'block';
         setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
     }
@@ -482,7 +472,7 @@
             const itemData = inventoryDatabase[selectedItem];
             document.getElementById('itemPrice').value = itemData.price;
             document.getElementById('itemQty').value = itemData.qty || 1;
-            document.getElementById('itemUnit').value = itemData.unit; // Automatically populates unit from inventory
+            document.getElementById('itemUnit').value = itemData.unit;
         }
     }
 
@@ -576,7 +566,7 @@
                             name: nameVal,
                             comment: "AI OCR Scanned",
                             qty: qtyVal,
-                            unit: "Pcs", // default unit for scanned rows
+                            unit: "Pcs",
                             price: priceVal,
                             discountPercent: 0,
                             total: qtyVal * priceVal
@@ -615,7 +605,6 @@
             return;
         }
 
-        // Mandatory Unit validation check
         if (!unit) {
             alert("The Unit field is mandatory. Please provide a unit (e.g., Pcs, Mtr, Coils).");
             document.getElementById('itemUnit').focus();
@@ -735,7 +724,6 @@
             return;
         }
 
-        // Final verification for mandatory unit fields before generating PDF
         for (let item of itemsList) {
             if (!item.unit || !item.unit.trim()) {
                 alert(`Error: The item "${item.name}" is missing a mandatory Unit. Please specify a unit.`);
