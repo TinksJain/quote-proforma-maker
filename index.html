@@ -66,8 +66,13 @@
         }
         .btn-add { background-color: #1B365D; }
         .btn-add:hover { background-color: #122440; }
-        .btn-pdf { background-color: #28a745; margin-top: 15px; font-size: 16px; padding: 14px; }
+        
+        .action-buttons { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-pdf { background-color: #28a745; font-size: 15px; padding: 14px; flex: 1; }
         .btn-pdf:hover { background-color: #218838; }
+        .btn-excel { background-color: #17a2b8; font-size: 15px; padding: 14px; flex: 1; }
+        .btn-excel:hover { background-color: #138496; }
+
         .btn-delete { background-color: #dc3545; padding: 6px 10px; font-size: 12px; width: auto; font-weight: bold; }
         .btn-convert { background-color: #6f42c1; width: auto; padding: 10px 15px; white-space: nowrap; }
 
@@ -110,6 +115,7 @@
             .row .form-group { flex: 1 1 100%; }
             .convert-box div { flex-direction: column; }
             .convert-box button { width: 100%; margin-top: 5px; }
+            .action-buttons { flex-direction: column; }
         }
     </style>
 </head>
@@ -269,7 +275,11 @@
         <textarea id="quotationNote" placeholder="e.g. Rate valid for 3 days only. GST extra as applicable."></textarea>
     </div>
 
-    <button type="button" id="btnPdf" class="btn-pdf">📄 Generate PDF & Backup Excel</button>
+    <!-- Decoupled Action Buttons -->
+    <div class="action-buttons">
+        <button type="button" id="btnPdf" class="btn-pdf">📄 Generate PDF Only</button>
+        <button type="button" id="btnExcel" class="btn-excel">📊 Export Backup Excel Only</button>
+    </div>
 </div>
 
 <!-- Load inventory database directly via script tag -->
@@ -307,7 +317,8 @@
     }
 
     document.getElementById('btnAdd').addEventListener('click', addItem);
-    document.getElementById('btnPdf').addEventListener('click', generatePDFAndBackupExcel);
+    document.getElementById('btnPdf').addEventListener('click', generatePDFOnly);
+    document.getElementById('btnExcel').addEventListener('click', exportBackupExcelOnly);
     document.getElementById('excelFile').addEventListener('change', handleExcelUpload);
     document.getElementById('imageFile').addEventListener('change', handleImageUpload);
     document.getElementById('firmName').addEventListener('change', generateRefNumber);
@@ -438,7 +449,7 @@
         reader.readAsArrayBuffer(file);
     }
 
-    // --- BULLETPROOF MOBILE & DESKTOP COMBO BOX AUTOCOMPLETE LOGIC ---
+    // --- COMBO BOX AUTOCOMPLETE LOGIC ---
     itemNameInput.addEventListener('input', function() {
         const val = this.value.toLowerCase().trim();
         suggestionsBox.innerHTML = ''; 
@@ -452,7 +463,6 @@
                 div.className = 'autocomplete-item';
                 div.innerHTML = item.replace(new RegExp(`(${val})`, "gi"), "<strong>$1</strong>");
                 
-                // Use touchstart and mousedown with preventDefault to prevent input blur cancellation on mobile
                 const selectItemAction = (e) => {
                     e.preventDefault();
                     itemNameInput.value = item;
@@ -469,7 +479,6 @@
         }
     });
 
-    // Close suggestions box if clicking outside
     document.addEventListener('click', function(e) {
         if (e.target !== itemNameInput && !suggestionsBox.contains(e.target)) {
             suggestionsBox.innerHTML = '';
@@ -710,7 +719,17 @@
         return [prefix, cleanClient, cleanRef, dateStr].filter(Boolean).join('_');
     }
 
-    function exportBackupExcel(filenameBase) {
+    function exportBackupExcelOnly() {
+        if (itemsList.length === 0) {
+            alert("Please add at least one item before exporting Excel backup.");
+            return;
+        }
+        const docType = document.getElementById('docType').value;
+        const client = document.getElementById('clientName').value.trim();
+        const quotRef = document.getElementById('quotationRef').value.trim();
+        const docPrefix = (docType === 'QUOTATION') ? 'Quotation' : 'Proforma';
+        const filenameBase = getFormattedFilename(docPrefix, client, quotRef, new Date());
+
         const exportData = [["Item Description", "Price", "Quantity", "Unit"]];
         itemsList.forEach(item => exportData.push([item.name, item.price, item.qty, item.unit || ""]));
         const worksheet = XLSX.utils.aoa_to_sheet(exportData);
@@ -719,12 +738,7 @@
         XLSX.writeFile(workbook, `${filenameBase}.xlsx`);
     }
 
-    function isMobileDevice() {
-        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
-               || (window.innerWidth <= 768);
-    }
-
-    async function generatePDFAndBackupExcel() {
+    async function generatePDFOnly() {
         if (typeof window.jspdf === 'undefined') {
             alert("Error: jsPDF library failed to load.");
             return;
@@ -764,9 +778,10 @@
             doc.text("No.221, Govindappa Naicken Street, Sowcarpet, Chennai - 600001", 14, 23);
             doc.text("E-Mail: thehouseofcables@gmail.com | Phone: 99622931214 / 9952923288", 14, 27);
 
+            // Corrected logo placement (moved up 2 points from 10 to 8)
             if (firm === "The House of Cables and Wires Private Limited") {
                 const dataUri = await getLogoDataUri();
-                if (dataUri) doc.addImage(dataUri, 'JPEG', 162, 10, 32, 32);
+                if (dataUri) doc.addImage(dataUri, 'JPEG', 162, 8, 32, 32);
             }
 
             doc.setFontSize(11);
@@ -882,29 +897,27 @@
             const docPrefix = (docType === 'QUOTATION') ? 'Quotation' : 'Proforma';
             const filenameBase = getFormattedFilename(docPrefix, client, quotRef, d);
 
-            if (isMobileDevice()) {
-                const dataUriString = doc.output('datauristring');
-                const newWindow = window.open();
-                if (newWindow) {
-                    newWindow.document.write(`
-                        <html>
-                        <head><title>${filenameBase}.pdf</title></head>
-                        <body style="margin:0; background:#eee; text-align:center;">
-                            <div style="padding:10px; background:#1B365D; color:white; font-family:sans-serif;">
-                                <b>PDF Generated Successfully!</b> Tap or share to save file.
-                            </div>
-                            <iframe src="${dataUriString}" style="width:100%; height:90vh; border:none;"></iframe>
-                        </body>
-                        </html>
-                    `);
-                } else {
-                    window.location.href = dataUriString;
+            // --- BULLETPROOF SAFARI & MOBILE PDF HANDLER ---
+            const pdfBlob = doc.output('blob');
+            const blobUrl = URL.createObjectURL(pdfBlob);
+
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            
+            if (isIOS || /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)) {
+                // Safari & iOS requires opening the blob URL natively in a new tab for built-in sharing/saving
+                const opened = window.open(blobUrl, '_blank');
+                if (!opened) {
+                    window.location.href = blobUrl;
                 }
             } else {
-                doc.save(`${filenameBase}.pdf`);
+                // Chrome & Desktop Download Anchor Trigger
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = `${filenameBase}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
             }
-
-            exportBackupExcel(filenameBase);
 
             if (docType === 'QUOTATION') {
                 saveQuotationRecord(quotRef, firm, client, itemsList, quotationNote);
