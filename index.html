@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quotation & Proforma Generator</title>
-    <!-- Dependencies -->
+    <!-- External Dependencies -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -40,7 +40,7 @@
             padding: 10px; 
             border: 1px solid #ccc; 
             border-radius: 6px; 
-            font-size: 15px; /* Minimum 16px stops automatic zoom in iOS Safari */
+            font-size: 15px; 
         }
         textarea { resize: vertical; height: 60px; font-family: inherit; }
 
@@ -104,7 +104,6 @@
 
         #uploadStatus, #ocrStatus, #convertStatus { font-size: 12px; font-weight: bold; margin-top: 5px; display: none; }
 
-        /* Mobile specific adjustments */
         @media (max-width: 600px) {
             body { padding: 6px; }
             .container { padding: 12px; }
@@ -129,28 +128,26 @@
         <div id="convertStatus"></div>
     </div>
 
-    <!-- Excel Upload Box -->
+    <!-- Excel Upload Box / GitHub Sync -->
     <div class="excel-box">
-        <label for="excelFile">📂 Load Inventory (Excel/CSV)</label>
+        <label for="excelFile">📂 Inventory Catalog (GitHub Cloud Sync or Local File)</label>
         <input type="file" id="excelFile" accept=".xlsx, .xls, .csv">
-        
         <div class="checkbox-group">
             <input type="checkbox" id="autoAddExcelRows">
             <label for="autoAddExcelRows" style="margin:0; font-weight:normal; font-size: 12px;">
                 Auto-add all rows directly to item list upon upload
             </label>
         </div>
-
         <div id="uploadStatus">✓ Inventory loaded successfully!</div>
         <small style="color: #666; display: block; margin-top: 4px; font-size: 11px;">Format: Col A = Name, Col B = Price, Col C = Qty, Col D = Unit</small>
     </div>
 
     <!-- OCR Upload Box -->
     <div class="ocr-box">
-        <label for="imageFile" style="color: #8a6300;">📷 Load Items from Image (OCR Scan)</label>
+        <label for="imageFile" style="color: #8a6300;">📷 Load Items from Image (AI OCR Scan)</label>
         <input type="file" id="imageFile" accept="image/*">
         <div id="ocrStatus">Scanning image text...</div>
-        <small style="color: #8a6300; display: block; margin-top: 4px; font-size: 11px;">Extracts item names & prices from clear document images.</small>
+        <small style="color: #8a6300; display: block; margin-top: 4px; font-size: 11px;">Applies threshold filters & upscaling for high-precision item/price extraction.</small>
     </div>
 
     <div class="row">
@@ -217,9 +214,10 @@
 
     <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
 
+    <!-- Combo Box Item Entry Section -->
     <div class="form-group">
-        <label>Item Description</label>
-        <input type="text" id="itemName" autocomplete="off" placeholder="Search or add custom item...">
+        <label>Item Description (Type to search combo box)</label>
+        <input type="text" id="itemName" autocomplete="off" placeholder="Type product name to search catalog...">
         <div id="autocomplete-list" class="autocomplete-items"></div>
     </div>
 
@@ -234,8 +232,8 @@
             <input type="number" id="itemQty" value="1" min="0.01" step="any">
         </div>
         <div class="form-group">
-            <label>Unit (Optional)</label>
-            <input type="text" id="itemUnit" placeholder="e.g. Coils, Mtr, Pcs">
+            <label>Unit <span style="color:red;">*</span> (Mandatory)</label>
+            <input type="text" id="itemUnit" placeholder="e.g. Coils, Mtr, Pcs" required>
         </div>
         <div class="form-group">
             <label>Price (₹)</label>
@@ -278,6 +276,25 @@
     let itemsList = [];
     let inventoryDatabase = {};
 
+    // OPTIONAL: Paste your GitHub raw CSV/Excel link here for automatic cloud inventory sync
+    const GITHUB_CSV_URL = "https://github.com/TinksJain/quote-proforma-maker/raw/refs/heads/main/inventory.xlsx"; 
+
+    async function loadCloudInventory() {
+        if (!GITHUB_CSV_URL) return;
+        try {
+            const response = await fetch(GITHUB_CSV_URL);
+            if (response.ok) {
+                const data = await response.text();
+                const workbook = XLSX.read(data, { type: 'string' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                parseInventoryRows(rows);
+            }
+        } catch (e) {
+            console.warn("Cloud inventory sync skipped or failed.");
+        }
+    }
+
     async function getLogoDataUri() {
         try {
             const response = await fetch('HOC_Logo.jpeg');
@@ -314,6 +331,7 @@
 
     window.onload = function() {
         generateRefNumber();
+        loadCloudInventory();
     };
 
     function generateRefNumber() {
@@ -382,105 +400,61 @@
         localStorage.setItem(`quotation_store_${quotRef.trim().toUpperCase()}`, JSON.stringify(record));
     }
 
+    function parseInventoryRows(rows) {
+        inventoryDatabase = {};  
+        let addedCount = 0;
+        const autoAdd = document.getElementById('autoAddExcelRows').checked;
+
+        for (let i = 1; i < rows.length; i++) {
+            const name = rows[i][0];
+            const price = parseFloat(rows[i][1]) || 0;
+            const qty = parseFloat(rows[i][2]) || 1;
+            const unit = rows[i][3] ? rows[i][3].toString().trim() : "";
+
+            if (name && name.toString().trim() !== "") {
+                const cleanName = name.toString().trim();
+                inventoryDatabase[cleanName] = { price, qty, unit };
+
+                if (autoAdd) {
+                    itemsList.push({ name: cleanName, comment: "", qty, unit, price, discountPercent: 0, total: qty * price });
+                    addedCount++;
+                }
+            }
+        }
+        
+        if (autoAdd && addedCount > 0) updateTable();
+
+        const statusEl = document.getElementById('uploadStatus');
+        statusEl.innerText = autoAdd ? `✓ ${addedCount} items added automatically!` : '✓ Inventory loaded successfully!';
+        statusEl.style.display = 'block';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+    }
+
     function handleExcelUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
 
-        const autoAdd = document.getElementById('autoAddExcelRows').checked;
         const reader = new FileReader();
-
         reader.onload = function(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-            inventoryDatabase = {};  
-            let addedCount = 0;
-
-            for (let i = 1; i < rows.length; i++) {
-                const name = rows[i][0];
-                const price = parseFloat(rows[i][1]) || 0;
-                const qty = parseFloat(rows[i][2]) || 1;
-                const unit = rows[i][3] ? rows[i][3].toString().trim() : "";
-
-                if (name && name.toString().trim() !== "") {
-                    const cleanName = name.toString().trim();
-                    inventoryDatabase[cleanName] = { price, qty, unit };
-
-                    if (autoAdd) {
-                        itemsList.push({ name: cleanName, comment: "", qty, unit, price, discountPercent: 0, total: qty * price });
-                        addedCount++;
-                    }
-                }
-            }
-            
-            if (autoAdd && addedCount > 0) updateTable();
-
-            const statusEl = document.getElementById('uploadStatus');
-            statusEl.innerText = autoAdd ? `✓ ${addedCount} items added automatically!` : '✓ Inventory loaded successfully!';
-            statusEl.style.display = 'block';
-            setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+            parseInventoryRows(rows);
         };
         reader.readAsArrayBuffer(file);
     }
 
-    async function handleImageUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const ocrStatus = document.getElementById('ocrStatus');
-        ocrStatus.style.display = 'block';
-        ocrStatus.style.color = '#d99b00';
-        ocrStatus.innerText = '🔍 Processing image text via OCR... Please wait.';
-
-        try {
-            const worker = await Tesseract.createWorker('eng');
-            const ret = await worker.recognize(file);
-            await worker.terminate();
-
-            const textLines = ret.data.text.split('\n');
-            let scannedItemsCount = 0;
-
-            textLines.forEach(line => {
-                const cleanLine = line.trim();
-                if (cleanLine.length < 3) return;
-
-                const priceMatch = cleanLine.match(/([\d,]+(?:\.\d{1,2})?)\s*$/);
-                if (priceMatch) {
-                    const priceVal = parseFloat(priceMatch[1].replace(/,/g, ''));
-                    let nameVal = cleanLine.substring(0, priceMatch.index).trim().replace(/^[^a-zA-Z0-9]+/, '');
-
-                    if (nameVal.length > 2 && !isNaN(priceVal)) {
-                        itemsList.push({ name: nameVal, comment: "OCR Extracted", qty: 1, unit: "", price: priceVal, discountPercent: 0, total: priceVal });
-                        scannedItemsCount++;
-                    }
-                }
-            });
-
-            if (scannedItemsCount > 0) {
-                updateTable();
-                ocrStatus.style.color = '#28a745';
-                ocrStatus.innerText = `✓ Successfully extracted ${scannedItemsCount} items!`;
-            } else {
-                ocrStatus.style.color = '#dc3545';
-                ocrStatus.innerText = '⚠️ No readable items/prices found.';
-            }
-        } catch (err) {
-            ocrStatus.style.color = '#dc3545';
-            ocrStatus.innerText = '❌ Error processing image text.';
-        }
-
-        setTimeout(() => { ocrStatus.style.display = 'none'; }, 5000);
-    }
-
+    // --- COMBO BOX AUTOCOMPLETE LOGIC ---
     itemNameInput.addEventListener('input', function() {
-        const val = this.value;
+        const val = this.value.toLowerCase();
         suggestionsBox.innerHTML = ''; 
         if (!val) return;
 
+        let matchCount = 0;
         for (const item in inventoryDatabase) {
-            if (item.toLowerCase().includes(val.toLowerCase())) {
+            if (item.toLowerCase().includes(val)) {
+                matchCount++;
                 const div = document.createElement('div');
                 div.className = 'autocomplete-item';
                 div.innerHTML = item.replace(new RegExp(`(${val})`, "gi"), "<strong>$1</strong>");
@@ -490,6 +464,7 @@
                     autoFillDetails(); 
                 });
                 suggestionsBox.appendChild(div);
+                if (matchCount > 20) break; // limit items for snappy rendering
             }
         }
     });
@@ -504,8 +479,124 @@
             const itemData = inventoryDatabase[selectedItem];
             document.getElementById('itemPrice').value = itemData.price;
             document.getElementById('itemQty').value = itemData.qty || 1;
-            document.getElementById('itemUnit').value = itemData.unit;
+            document.getElementById('itemUnit').value = itemData.unit; // Automatically updates the unit field
         }
+    }
+
+    // --- IMAGE OCR PREPROCESSING ---
+    function preprocessImage(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const targetWidth = 2400;
+                    const scale = targetWidth / img.width;
+                    canvas.width = targetWidth;
+                    canvas.height = img.height * scale;
+
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imgData.data;
+
+                    let sum = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        sum += (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+                    }
+                    const avgBrightness = sum / (data.length / 4);
+                    const threshold = avgBrightness * 0.85;
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                        let val = gray < threshold ? 0 : 255;
+                        data[i] = val; data[i + 1] = val; data[i + 2] = val;
+                    }
+
+                    ctx.putImageData(imgData, 0, 0);
+                    resolve(canvas.toDataURL('image/jpeg', 1.0));
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function handleImageUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const ocrStatus = document.getElementById('ocrStatus');
+        ocrStatus.style.display = 'block';
+        ocrStatus.style.color = '#d99b00';
+        ocrStatus.innerText = '⚙️ Preprocessing image & running AI text extraction...';
+
+        try {
+            const processedImageUrl = await preprocessImage(file);
+            const worker = await Tesseract.createWorker('eng');
+            
+            await worker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,/-()₹Rs: ',
+                tessedit_pageseg_mode: Tesseract.PSM.AUTO_TABLE,
+            });
+
+            const ret = await worker.recognize(processedImageUrl);
+            await worker.terminate();
+
+            const textLines = ret.data.text.split('\n');
+            let scannedItemsCount = 0;
+
+            textLines.forEach(line => {
+                const cleanLine = line.trim();
+                if (cleanLine.length < 4) return;
+
+                const priceRegex = /(?:rs\.?|inr|₹)?\s*([\d,]+\.\d{2}|[\d,]+)\s*$/i;
+                const priceMatch = cleanLine.match(priceRegex);
+
+                if (priceMatch) {
+                    const priceVal = parseFloat(priceMatch[1].replace(/,/g, ''));
+                    let nameVal = cleanLine.substring(0, priceMatch.index).trim();
+                    nameVal = nameVal.replace(/^[^a-zA-Z0-9]+/, '').trim();
+
+                    let qtyVal = 1;
+                    const qtyRegex = /\b(?:qty|q)?[:\s]*(\d+(?:\.\d+)?)\s*(?:pcs|nos|mtr|coils)?\b/i;
+                    const qtyMatch = nameVal.match(qtyRegex);
+                    if (qtyMatch) {
+                        qtyVal = parseFloat(qtyMatch[1]) || 1;
+                        nameVal = nameVal.replace(qtyMatch[0], '').trim();
+                    }
+
+                    if (nameVal.length > 2 && !isNaN(priceVal) && priceVal > 0) {
+                        itemsList.push({
+                            name: nameVal,
+                            comment: "AI OCR Scanned",
+                            qty: qtyVal,
+                            unit: "Pcs", // default unit if scanned via OCR
+                            price: priceVal,
+                            discountPercent: 0,
+                            total: qtyVal * priceVal
+                        });
+                        scannedItemsCount++;
+                    }
+                }
+            });
+
+            if (scannedItemsCount > 0) {
+                updateTable();
+                ocrStatus.style.color = '#28a745';
+                ocrStatus.innerText = `✓ Successfully extracted ${scannedItemsCount} items with high accuracy!`;
+            } else {
+                ocrStatus.style.color = '#dc3545';
+                ocrStatus.innerText = '⚠️ Could not clearly isolate prices.';
+            }
+        } catch (err) {
+            ocrStatus.style.color = '#dc3545';
+            ocrStatus.innerText = '❌ Error processing image text.';
+        }
+
+        setTimeout(() => { ocrStatus.style.display = 'none'; }, 6000);
     }
 
     function addItem() {
@@ -518,6 +609,13 @@
 
         if (!name.trim()) {
             alert("Please enter an item description.");
+            return;
+        }
+
+        // Mandatory Unit check
+        if (!unit) {
+            alert("The Unit field is mandatory. Please provide a unit (e.g., Pcs, Mtr, Coils).");
+            document.getElementById('itemUnit').focus();
             return;
         }
 
@@ -536,7 +634,18 @@
     }
 
     function updateItemRow(index, field, value) {
-        itemsList[index][field] = parseFloat(value) || 0;
+        if (field === 'unit' && !value.trim()) {
+            alert("Unit cannot be empty.");
+            updateTable();
+            return;
+        }
+        
+        if (field === 'unit') {
+            itemsList[index][field] = value.trim();
+        } else {
+            itemsList[index][field] = parseFloat(value) || 0;
+        }
+
         const qty = itemsList[index].qty;
         const price = itemsList[index].price;
         const discountPercent = itemsList[index].discountPercent;
@@ -561,14 +670,16 @@
             if (index % 2 === 1) tr.style.backgroundColor = "#F7F9FA";
             
             const netPrice = item.price * (1 - (item.discountPercent / 100));
-            const unitLabel = item.unit ? `<span style="font-size:11px; color:#555;"> ${item.unit}</span>` : '';
 
             tr.innerHTML = `
                 <td>
                     <input type="text" class="table-input-name" value="${item.name.replaceAll('"', '&quot;')}" onchange="updateItemName(${index}, this.value)">
                     <input type="text" class="table-input-note" value="${item.comment || ''}" placeholder="Add note..." onchange="updateItemComment(${index}, this.value)">
                 </td>
-                <td><input type="number" class="table-input" value="${item.qty}" min="0" step="any" onchange="updateItemRow(${index}, 'qty', this.value)">${unitLabel}</td>
+                <td>
+                    <input type="number" class="table-input" value="${item.qty}" min="0" step="any" onchange="updateItemRow(${index}, 'qty', this.value)">
+                    <input type="text" value="${item.unit || ''}" placeholder="Unit*" style="width:55px; font-size:11px; margin-top:2px; padding:2px;" onchange="updateItemRow(${index}, 'unit', this.value)" required title="Unit is mandatory">
+                </td>
                 <td><input type="number" class="table-input" value="${item.price}" min="0" step="any" onchange="updateItemRow(${index}, 'price', this.value)"></td>
                 <td><input type="number" class="table-input" value="${item.discountPercent}" min="0" max="100" step="any" onchange="updateItemRow(${index}, 'discountPercent', this.value)"></td>
                 <td style="color: #28a745; font-weight: bold;">₹${formatCurrency(netPrice)}</td>
@@ -606,7 +717,6 @@
         XLSX.writeFile(workbook, `${filenameBase}.xlsx`);
     }
 
-    // Helper to detect Mobile devices
     function isMobileDevice() {
         return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
                || (window.innerWidth <= 768);
@@ -620,6 +730,14 @@
         if (itemsList.length === 0) {
             alert("Please add at least one item before generating PDF.");
             return;
+        }
+
+        // Final sanity check for mandatory units on table items
+        for (let item of itemsList) {
+            if (!item.unit || !item.unit.trim()) {
+                alert(`Error: The item "${item.name}" is missing a mandatory Unit. Please specify a unit before downloading.`);
+                return;
+            }
         }
 
         try {
@@ -688,7 +806,7 @@
             itemsList.forEach(item => {
                 subtotalSum += item.total;
                 const desc = item.comment ? `${item.name}\nNote: ${item.comment}` : item.name;
-                const qtyVal = item.unit ? `${item.qty} ${item.unit}` : item.qty.toString();
+                const qtyVal = `${item.qty} ${item.unit}`;
 
                 if (showDiscount) {
                     body.push([desc, qtyVal, formatCurrency(item.price), item.discountPercent + '%', formatCurrency(item.total)]);
@@ -763,7 +881,6 @@
             const docPrefix = (docType === 'QUOTATION') ? 'Quotation' : 'Proforma';
             const filenameBase = getFormattedFilename(docPrefix, client, quotRef, d);
 
-            // MOBILE SAFE PDF DOWNLOAD/OPEN STRATEGY
             if (isMobileDevice()) {
                 const blob = doc.output('blob');
                 const blobUrl = URL.createObjectURL(blob);
